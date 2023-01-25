@@ -7,16 +7,17 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
-type WHIPToMPEGTSServer struct {
+type Server struct {
 	pcs map[string]*webrtc.PeerConnection
 
-	onMPEGTSStream func(string, io.Reader)
+	OnMPEGTSStream func(string, io.Reader)
 }
 
-func (s *WHIPToMPEGTSServer) Handler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/"):]
 	switch r.Method {
 	case http.MethodGet:
@@ -99,7 +100,7 @@ func (s *WHIPToMPEGTSServer) Handler(w http.ResponseWriter, r *http.Request) {
 		demuxers := make([]*RTPDemuxer, trackCount)
 		for i := 0; i < trackCount; i++ {
 			tr := <-tracks
-			demux, err := NewRTPDemuxer(tr.Codec(), tr)
+			demux, err := NewRTPDemuxer(tr.Codec(), &TrackReader{tr})
 			if err != nil {
 				log.Printf("Failed to create demuxer: %s", err)
 				w.WriteHeader(http.StatusInternalServerError)
@@ -116,7 +117,7 @@ func (s *WHIPToMPEGTSServer) Handler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		go func() {
-			s.onMPEGTSStream(pcid, muxer)
+			s.OnMPEGTSStream(pcid, muxer)
 			pc.Close()
 			delete(s.pcs, pcid)
 		}()
@@ -161,4 +162,13 @@ func (s *WHIPToMPEGTSServer) Handler(w http.ResponseWriter, r *http.Request) {
 
 		delete(s.pcs, id)
 	}
+}
+
+type TrackReader struct {
+	Track *webrtc.TrackRemote
+}
+
+func (r *TrackReader) ReadRTP() (*rtp.Packet, error) {
+	p, _, err := r.Track.ReadRTP()
+	return p, err
 }

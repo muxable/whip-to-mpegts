@@ -1,7 +1,8 @@
 package whiptompegts
 
 /*
-#cgo pkg-config: libavformat
+#cgo pkg-config: libavformat libavcodec
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include "demux.h"
 */
@@ -14,6 +15,7 @@ import (
 
 type MPEGTSMuxer struct {
 	avformatctx *C.AVFormatContext
+	avpkt       *C.AVPacket
 }
 
 func NewMPEGTSMuxer(demuxers []*RTPDemuxer) (*MPEGTSMuxer, error) {
@@ -37,41 +39,42 @@ func NewMPEGTSMuxer(demuxers []*RTPDemuxer) (*MPEGTSMuxer, error) {
 	// create the output streams
 	for i, demuxer := range demuxers {
 		avstream, err := C.avformat_new_stream(avformatctx, nil)
-		if err < 0 {
-			return nil, av_err("avformat_new_stream", err)
+		if avstream == nil {
+			return nil, fmt.Errorf("failed to create stream: %w", err)
 		}
 
 		avstream.index = C.int(i)
 		avstream.id = C.int(i)
 
 		// copy codec parameters from demuxer
-		avstream.codecpar = demuxer.avformatctx.streams[0].codecpar
+		streams := (*[1 << 30]*C.AVStream)(unsafe.Pointer(demuxer.avformatctx.streams))[:avformatctx.nb_streams:avformatctx.nb_streams]
+		avstream.codecpar = streams[0].codecpar
 	}
 
 	return &MPEGTSMuxer{
 		avformatctx: avformatctx,
+		avpkt:       C.av_packet_alloc(),
 	}, nil
 }
 
-func (m *MPEGTSMuxer) Read(buf []byte) error {
+func (m *MPEGTSMuxer) Read(buf []byte) (int, error) {
 	// read a packet from the muxer
-	avpacket := C.av_packet_alloc()
-	if avpacket == nil {
-		return errors.New("failed to allocate packet")
-	}
-
-	defer C.av_packet_free(&avpacket)
-
-	if err := C.av_read_frame(m.avformatctx, avpacket); err < 0 {
-		return av_err("av_read_frame", err)
+	if err := C.av_read_frame(m.avformatctx, m.avpkt); err < 0 {
+		return 0, av_err("av_read_frame", err)
 	}
 
 	// copy the packet into the buffer
-	if int(avpacket.size) > len(buf) {
-		return errors.New("buffer too small")
+	if int(m.avpkt.size) > len(buf) {
+		return 0, errors.New("buffer too small")
 	}
 
-	C.memcpy(unsafe.Pointer(&buf[0]), unsafe.Pointer(avpacket.data), C.size_t(avpacket.size))
+	C.memcpy(unsafe.Pointer(&buf[0]), unsafe.Pointer(m.avpkt.data), C.size_t(m.avpkt.size))
 
+	return int(m.avpkt.size), nil
+}
+
+func (m *MPEGTSMuxer) Close() error {
+	C.av_packet_free(&m.avpkt)
+	C.avformat_free_context(m.avformatctx)
 	return nil
 }

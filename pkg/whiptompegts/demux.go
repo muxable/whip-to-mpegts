@@ -19,7 +19,6 @@ import (
 )
 
 type RTPDemuxer struct {
-	Sinks       []*IndexedSink
 	avformatctx *C.AVFormatContext
 	rtpin       rtpio.RTPReader
 	rtpseq      *uint16 // used for debugging.
@@ -144,26 +143,4 @@ func goReadBufferFunc(opaque unsafe.Pointer, cbuf *C.uint8_t, bufsize C.int) C.i
 func goWriteRTCPPacketFunc(opaque unsafe.Pointer, buf *C.uint8_t, bufsize C.int) C.int {
 	// this function is necessary: https://trac.ffmpeg.org/ticket/9670
 	return bufsize
-}
-
-func (c *RTPDemuxer) Run() error {
-	streams := c.Streams()
-	if len(c.Sinks) != len(streams) {
-		return errors.New("number of streams does not match number of sinks")
-	}
-	for {
-		p := NewAVPacket()
-		if averr := C.av_read_frame(c.avformatctx, p.packet); averr < 0 {
-			return av_err("av_read_frame", averr)
-		}
-		streamidx := p.packet.stream_index
-		if sink := c.Sinks[streamidx]; sink != nil {
-			p.timebase = streams[streamidx].stream.time_base
-			p.packet.stream_index = C.int(sink.Index)
-			if err := sink.WriteAVPacket(p); err != nil {
-				return err
-			}
-		}
-		p.Unref()
-	}
 }

@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/mattn/go-pointer v0.0.1
 	github.com/pion/rtpio v0.1.4
+	github.com/pion/sdp v1.3.0
 	github.com/pion/webrtc/v3 v3.1.50
 	go.uber.org/zap v1.24.0
 )
@@ -27,6 +28,7 @@ require (
 	github.com/pion/transport v0.14.1 // indirect
 	github.com/pion/turn/v2 v2.0.8 // indirect
 	github.com/pion/udp v0.1.1 // indirect
+	github.com/pkg/errors v0.8.1 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/crypto v0.0.0-20221010152910-d6f0a8c073c2 // indirect
