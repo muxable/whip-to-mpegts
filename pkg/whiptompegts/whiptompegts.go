@@ -17,6 +17,13 @@ type Server struct {
 	OnMPEGTSStream func(string, io.Reader)
 }
 
+func NewServer(f func(string, io.Reader)) *Server {
+	return &Server{
+		pcs:            make(map[string]*webrtc.PeerConnection),
+		OnMPEGTSStream: f,
+	}
+}
+
 func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Path[len("/"):]
 	switch r.Method {
@@ -96,27 +103,25 @@ func (s *Server) Handler(w http.ResponseWriter, r *http.Request) {
 
 		s.pcs[pcid] = pc
 
-		// start an ffmpeg demuxer
-		demuxers := make([]*RTPDemuxer, trackCount)
-		for i := 0; i < trackCount; i++ {
-			tr := <-tracks
-			demux, err := NewRTPDemuxer(tr.Codec(), &TrackReader{tr})
+		go func() {
+			// start an ffmpeg demuxer
+			demuxers := make([]*RTPDemuxer, trackCount)
+			for i := 0; i < trackCount; i++ {
+				tr := <-tracks
+				demux, err := NewRTPDemuxer(tr.Codec(), &TrackReader{tr})
+				if err != nil {
+					log.Printf("Failed to create demuxer: %s", err)
+					return
+				}
+				demuxers[i] = demux
+			}
+
+			muxer, err := NewMPEGTSMuxer(demuxers)
 			if err != nil {
-				log.Printf("Failed to create demuxer: %s", err)
-				w.WriteHeader(http.StatusInternalServerError)
+				log.Printf("Failed to create muxer: %s", err)
 				return
 			}
-			demuxers[i] = demux
-		}
 
-		muxer, err := NewMPEGTSMuxer(demuxers)
-		if err != nil {
-			log.Printf("Failed to create muxer: %s", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		go func() {
 			s.OnMPEGTSStream(pcid, muxer)
 			pc.Close()
 			delete(s.pcs, pcid)

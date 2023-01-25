@@ -1,8 +1,9 @@
 package whiptompegts
 
 /*
-#cgo pkg-config: libavformat
+#cgo pkg-config: libavformat libavutil
 #include <libavformat/avformat.h>
+#include <libavutil/log.h>
 #include "demux.h"
 */
 import "C"
@@ -15,7 +16,6 @@ import (
 	"github.com/mattn/go-pointer"
 	"github.com/pion/rtpio/pkg/rtpio"
 	"github.com/pion/webrtc/v3"
-	"go.uber.org/zap"
 )
 
 type RTPDemuxer struct {
@@ -23,6 +23,10 @@ type RTPDemuxer struct {
 	rtpin       rtpio.RTPReader
 	rtpseq      *uint16 // used for debugging.
 	rawin       io.Reader
+}
+
+func init() {
+	C.av_log_set_level(56)
 }
 
 var (
@@ -100,43 +104,28 @@ func NewRTPDemuxer(codec webrtc.RTPCodecParameters, in rtpio.RTPReader) (*RTPDem
 //export goReadBufferFunc
 func goReadBufferFunc(opaque unsafe.Pointer, cbuf *C.uint8_t, bufsize C.int) C.int {
 	d := pointer.Restore(opaque).(*RTPDemuxer)
-	if d.rtpin != nil {
-		p, err := d.rtpin.ReadRTP()
-		if err != nil {
-			if err != io.EOF {
-				return AVERROR(C.EIO)
-			}
-			return AVERROR_EOF
-		}
-
-		b, err := p.Marshal()
-		if err != nil {
-			return AVERROR(C.EINVAL)
-		}
-
-		if d.rtpseq != nil && p.SequenceNumber != *d.rtpseq+1 {
-			zap.L().Warn("lost packets", zap.Uint16("prev", *d.rtpseq), zap.Uint16("seq", p.SequenceNumber))
-		}
-		d.rtpseq = &p.SequenceNumber
-
-		if C.int(len(b)) > bufsize {
-			return AVERROR(C.ENOMEM)
-		}
-
-		C.memcpy(unsafe.Pointer(cbuf), unsafe.Pointer(&b[0]), C.ulong(len(b)))
-
-		return C.int(len(b))
-	}
-	buf := make([]byte, int(bufsize))
-	n, err := d.rawin.Read(buf)
+	p, err := d.rtpin.ReadRTP()
 	if err != nil {
 		if err != io.EOF {
 			return AVERROR(C.EIO)
 		}
 		return AVERROR_EOF
 	}
-	C.memcpy(unsafe.Pointer(cbuf), unsafe.Pointer(&buf[0]), C.ulong(n))
-	return C.int(n)
+
+	b, err := p.Marshal()
+	if err != nil {
+		return AVERROR(C.EINVAL)
+	}
+
+	d.rtpseq = &p.SequenceNumber
+
+	if C.int(len(b)) > bufsize {
+		return AVERROR(C.ENOMEM)
+	}
+
+	C.memcpy(unsafe.Pointer(cbuf), unsafe.Pointer(&b[0]), C.ulong(len(b)))
+
+	return C.int(len(b))
 }
 
 //export goWriteRTCPPacketFunc
